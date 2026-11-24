@@ -183,7 +183,8 @@ code{background:#f3f4f8;padding:1px 6px;border-radius:6px;font-size:.92em}
 const CONFIG = {
   SUPABASE_URL: 'https://frhnzfobujepoxqtdkqw.supabase.co',        // e.g. 'https://abcdefgh.supabase.co'
   SUPABASE_ANON_KEY: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImZyaG56Zm9idWplcG94cXRka3F3Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTU0ODE0MzMsImV4cCI6MjExMTA1NzQzM30.OWtgZNusxyqvq-uBoCe94qcjzH_qARwDFTJXj0O29Bo',   // Supabase → Project Settings → API → anon public key
-  SITE_URL: '',            // Optional: final hosted URL of this page (used for the QR code)
+  SITE_URL: '',
+  HR_ACCESS_PASSWORD: 'HR',  // used by the one-tap "HR access" button; must match the HR password on the Passwords page            // Optional: final hosted URL of this page (used for the QR code)
   EVENT_NAME: 'A Symphony of 75 Years',
   EVENT_SUBTITLE: 'The PGB Christmas Party Celebration',
   EVENT_DATE: 'December 4, 2026',
@@ -934,14 +935,12 @@ function renderPinLogin(notice = '') {
   <div class="login-wrap">
     <form class="card login-card" id="pinForm">
       <img src="${BANNER}" alt="" style="width:100%;border-radius:12px;display:block;margin-bottom:14px">
-      <h1 class="title">Staff Login</h1>
-      <p class="sub">${esc(CONFIG.EVENT_SUBTITLE)} · ${esc(CONFIG.EVENT_DATE)}</p>
       ${notice ? `<div class="alert alert-info" style="margin-bottom:12px">${esc(notice)}</div>` : ''}
-      <div class="login-type" role="group" aria-label="Login as">
-        <button type="button" data-type="admin">Admin</button>
-        <button type="button" data-type="hr">HR access</button>
+      <div class="login-type" role="group" aria-label="Open as">
+        <button type="button" class="on" data-type="admin">Admin</button>
+        <button type="button" id="hrBtn">HR access</button>
       </div>
-      <label class="label" for="pin" id="pinLabel">Password</label>
+      <label class="label" for="pin">Admin password</label>
       <input class="input" id="pin" type="password" autocomplete="current-password" required autofocus>
       <label style="display:flex;gap:8px;align-items:center;margin-top:12px;font-size:14px;color:#374151">
         <input type="checkbox" id="remember" checked> Keep me logged in on this device
@@ -950,16 +949,22 @@ function renderPinLogin(notice = '') {
       <button class="btn btn-gold btn-block" style="margin-top:16px" id="pbtn">Log in</button>
     </form>
   </div>`;
-  let loginType = 'admin';
-  const setType = (t) => {
-    loginType = t;
-    app.querySelectorAll('.login-type button').forEach((b) => b.classList.toggle('on', b.dataset.type === t));
-    $('#pinLabel').textContent = t === 'hr' ? 'HR password' : 'Admin password';
-    $('#perr').innerHTML = ''; $('#pin').focus();
-  };
-  app.querySelectorAll('.login-type button').forEach((b) => (b.onclick = () => setType(b.dataset.type)));
-  setType(loginType);
   setTimeout(() => $('#pin') && $('#pin').focus(), 50);
+  const showErr = (m) => { $('#perr').innerHTML = `<div class="alert alert-error" style="margin-top:12px">${m}</div>`; };
+  const enter = (p, remember) => {
+    savePin(p, remember);
+    if (!location.hash.startsWith('#/admin')) history.replaceState(null, '', location.pathname + location.search + '#/admin');
+    route();
+  };
+  // HR access: one tap, no password to type
+  $('#hrBtn').onclick = async () => {
+    const b = $('#hrBtn'); b.disabled = true; b.textContent = 'Opening…';
+    const { data: role, error } = await sb.rpc('pin_role', { p_pin: CONFIG.HR_ACCESS_PASSWORD });
+    b.disabled = false; b.textContent = 'HR access';
+    if (error) return error.code === 'PGRST202' ? renderUpgrade() : showErr(`Connection problem: ${esc(error.message)}`);
+    if (role !== 'hr') return showErr('HR access is not set up yet. The Admin needs to set the HR password on the Passwords page.');
+    enter(CONFIG.HR_ACCESS_PASSWORD, false);
+  };
   $('#pinForm').onsubmit = async (e) => {
     e.preventDefault();
     const p = $('#pin').value;
@@ -967,15 +972,9 @@ function renderPinLogin(notice = '') {
     const btn = $('#pbtn'); btn.disabled = true; btn.textContent = 'Checking…';
     const { data: role, error } = await sb.rpc('pin_role', { p_pin: p });
     btn.disabled = false; btn.textContent = 'Log in';
-    if (error) {
-      if (error.code === 'PGRST202') return renderUpgrade();
-      $('#perr').innerHTML = `<div class="alert alert-error" style="margin-top:12px">Connection problem: ${esc(error.message)}</div>`; return;
-    }
-    const allowed = loginType === 'hr' ? ['hr', 'monitor'] : ['admin'];
-    if (!role || !allowed.includes(role)) { $('#perr').innerHTML = `<div class="alert alert-error" style="margin-top:12px">Wrong ${loginType === 'hr' ? 'HR' : 'Admin'} password. Please try again.</div>`; $('#pin').select(); return; }
-    savePin(p, $('#remember').checked);
-    if (!location.hash.startsWith('#/admin')) history.replaceState(null, '', location.pathname + location.search + '#/admin');
-    route();
+    if (error) return error.code === 'PGRST202' ? renderUpgrade() : showErr(`Connection problem: ${esc(error.message)}`);
+    if (!role || role === 'hr') { showErr('Wrong Admin password. Please try again.'); $('#pin').select(); return; }
+    enter(p, $('#remember').checked);
   };
 }
 
@@ -987,7 +986,7 @@ function renderSettings(main) {
       <div class="panel-head"><h3>Change a password</h3></div>
       <form class="panel-body" id="pwForm" style="display:grid;gap:12px;max-width:440px">
         <div><label class="label">Which password</label>
-          <select class="select" name="which"><option value="admin">Admin (full access)</option><option value="hr">HR (view &amp; search names only)</option><option value="monitor">Monitor (view only)</option></select></div>
+          <select class="select" name="which"><option value="admin">Admin (full access)</option><option value="hr">HR (view &amp; search names only) — keep as ${esc(CONFIG.HR_ACCESS_PASSWORD)} for the HR access button</option><option value="monitor">Monitor (view only)</option></select></div>
         <div><label class="label">New password</label><input class="input" name="p1" type="password" required></div>
         <div><label class="label">Type it again</label><input class="input" name="p2" type="password" required></div>
         <button class="btn btn-gold">Save new password</button>
