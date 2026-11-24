@@ -212,6 +212,37 @@ const LIBS = {
   qr: 'https://cdnjs.cloudflare.com/ajax/libs/qrcode-generator/1.4.4/qrcode.min.js',
 };
 
+// Password roles (v4 adds HR). Also shown on its own as the HR upgrade script.
+const PIN_ROLE_SQL = `-- ===================== PASSWORD ROLES (v4: adds HR) =====================
+--   admin_pin_hash   -> full access (masterlist upload, clear, undo, passwords)
+--   monitor_pin_hash -> live dashboard + exports (view only)
+--   hr_pin_hash      -> dashboard: view and search names only
+create or replace function public._pin_role(p_pin text) returns text
+language sql stable security definer set search_path = public, extensions as $$
+  select case
+    when exists (select 1 from public.app_settings where key = 'admin_pin_hash'   and value = crypt(coalesce(p_pin,''), value)) then 'admin'
+    when exists (select 1 from public.app_settings where key = 'monitor_pin_hash' and value = crypt(coalesce(p_pin,''), value)) then 'monitor'
+    when exists (select 1 from public.app_settings where key = 'hr_pin_hash'      and value = crypt(coalesce(p_pin,''), value)) then 'hr'
+  end;
+$$;
+
+create or replace function public.admin_change_pin(p_pin text, p_which text, p_new text) returns void
+language plpgsql volatile security definer set search_path = public, extensions as $$
+begin
+  perform public._require_pin(p_pin, true);
+  if p_which not in ('admin','monitor','hr') then raise exception 'Invalid password type'; end if;
+  if length(coalesce(p_new,'')) < 2 then raise exception 'Password too short'; end if;
+  insert into public.app_settings (key, value) values (p_which || '_pin_hash', crypt(p_new, gen_salt('bf')))
+  on conflict (key) do update set value = excluded.value;
+end $$;
+`;
+const HR_UPGRADE_SQL = `-- PGB Christmas Party — add the HR (view & search) password
+-- Supabase -> SQL Editor -> New query -> paste all -> Run. Safe to re-run; keeps all data.
+` + PIN_ROLE_SQL + `
+revoke all on function public._pin_role(text) from public, anon, authenticated;
+grant execute on function public.admin_change_pin(text, text, text) to anon, authenticated;
+`;
+
 const SETUP_SQL = `-- PGB Christmas Party — Attendance System database setup (v2: monitoring personnel)
 -- Supabase → SQL Editor → New query → paste all → Run.
 -- Safe to re-run. Running it on an existing v1 database upgrades it and keeps all data.
@@ -422,20 +453,10 @@ do $$ begin
 end $$;
 
 -- ===================== PASSWORD-ONLY ADMIN ACCESS (v3) =====================
--- Two shared passwords, stored only as bcrypt hashes:
---   admin_pin_hash   -> full access (masterlist upload, undo, passwords)
---   monitor_pin_hash -> live dashboard + exports (view only)
+-- Shared passwords, stored only as bcrypt hashes (see PASSWORD ROLES below).
 create table if not exists public.app_settings (key text primary key, value text not null);
 alter table public.app_settings enable row level security;
 revoke all on public.app_settings from anon, authenticated;
-
-create or replace function public._pin_role(p_pin text) returns text
-language sql stable security definer set search_path = public, extensions as $$
-  select case
-    when exists (select 1 from public.app_settings where key = 'admin_pin_hash'   and value = crypt(coalesce(p_pin,''), value)) then 'admin'
-    when exists (select 1 from public.app_settings where key = 'monitor_pin_hash' and value = crypt(coalesce(p_pin,''), value)) then 'monitor'
-  end;
-$$;
 
 -- Login check (slows down wrong guesses)
 create or replace function public.pin_role(p_pin text) returns text
@@ -457,6 +478,7 @@ begin
   return r;
 end $$;
 
+${PIN_ROLE_SQL}
 create or replace function public.admin_employees(p_pin text) returns setof public.employees
 language plpgsql stable security definer set search_path = public as $$
 begin
@@ -512,16 +534,6 @@ begin
   perform public._require_pin(p_pin, true);
   delete from public.attendance where true;
   delete from public.employees where true;
-end $$;
-
-create or replace function public.admin_change_pin(p_pin text, p_which text, p_new text) returns void
-language plpgsql volatile security definer set search_path = public, extensions as $$
-begin
-  perform public._require_pin(p_pin, true);
-  if p_which not in ('admin','monitor') then raise exception 'Invalid password type'; end if;
-  if length(coalesce(p_new,'')) < 4 then raise exception 'Password too short'; end if;
-  insert into public.app_settings (key, value) values (p_which || '_pin_hash', crypt(p_new, gen_salt('bf')))
-  on conflict (key) do update set value = excluded.value;
 end $$;
 
 revoke all on function public._pin_role(text) from public, anon, authenticated;
@@ -835,7 +847,9 @@ function showResult(kind, r, onDone) {
 }
 
 /* =========================== ADMIN =========================== */
-let ME = null; // { email, full_name, role: 'admin'|'monitor', affiliate|null }
+let ME = null; // { email, full_name, role: 'admin'|'monitor'|'hr', affiliate|null }
+const ROLE_LABEL = { admin: 'Admin', monitor: 'Monitor · view only', hr: 'HR · view & search' };
+
 
 /* Password-only admin access. Admin password = full access, Monitor password = view only. */
 const PIN_KEY = 'pgb-xmas-pin';
@@ -870,15 +884,16 @@ async function renderAdmin(h, rid) {
     return;
   }
   if (!role) { clearPin(); return renderPinLogin('Password changed or incorrect. Please log in again.'); }
-  ME = { role, full_name: role === 'admin' ? 'Admin' : 'Monitor', email: '', affiliate: null };
-  const isAdmin = role === 'admin';
+  ME = { role, full_name: role === 'admin' ? 'Admin' : role === 'hr' ? 'HR' : 'Monitor', email: '', affiliate: null };
+  const isAdmin = role === 'admin', isHr = role === 'hr';
 
   const pages = { 'admin/upload': 'upload', 'admin/qr': 'qr', 'admin/settings': 'settings' };
   let page = pages[h] || 'dash';
   if (!isAdmin && (page === 'upload' || page === 'settings')) page = 'dash';
+  if (isHr) page = 'dash'; // HR: view and search names only
   const nav = [['dash', '#/admin', 'Dashboard']];
   if (isAdmin) nav.push(['upload', '#/admin/upload', 'Masterlist']);
-  nav.push(['qr', '#/admin/qr', 'Event QR']);
+  if (!isHr) nav.push(['qr', '#/admin/qr', 'Event QR']);
   if (isAdmin) nav.push(['settings', '#/admin/settings', 'Passwords']);
 
   app.innerHTML = `
@@ -890,7 +905,7 @@ async function renderAdmin(h, rid) {
         <a href="${esc(guestUrl())}" target="_blank" rel="noopener" title="Open the employee check-in page">Check-in page ↗</a>
         <button id="signOut">Log out</button>
       </nav>
-      <div class="whoami"><span class="role-chip ${isAdmin ? 'admin' : ''}">${isAdmin ? 'Admin' : 'Monitor · view only'}</span></div>
+      <div class="whoami"><span class="role-chip ${isAdmin ? 'admin' : ''}">${ROLE_LABEL[role] || role}</span></div>
     </div>
   </header>
   <main class="admin-main" id="adminMain"></main>`;
@@ -947,7 +962,7 @@ function renderSettings(main) {
       <div class="panel-head"><h3>Change a password</h3></div>
       <form class="panel-body" id="pwForm" style="display:grid;gap:12px;max-width:440px">
         <div><label class="label">Which password</label>
-          <select class="select" name="which"><option value="admin">Admin (full access)</option><option value="monitor">Monitor (view only)</option></select></div>
+          <select class="select" name="which"><option value="admin">Admin (full access)</option><option value="hr">HR (view &amp; search names only)</option><option value="monitor">Monitor (view only)</option></select></div>
         <div><label class="label">New password</label><input class="input" name="p1" type="password" required></div>
         <div><label class="label">Type it again</label><input class="input" name="p2" type="password" required></div>
         <button class="btn btn-gold">Save new password</button>
@@ -958,14 +973,21 @@ function renderSettings(main) {
     e.preventDefault();
     const f = e.target, which = f.which.value, p1 = f.p1.value;
     const show = (k, m) => { $('#smsg').innerHTML = `<div class="alert ${k}">${esc(m)}</div>`; };
-    if (p1.length < 4) return show('alert-error', 'Use at least 4 characters.');
+    if (p1.length < 2) return show('alert-error', 'Use at least 2 characters.');
     if (p1 !== f.p2.value) return show('alert-error', 'The two passwords do not match.');
     try {
       await adminRpc('admin_change_pin', { p_which: which, p_new: p1 });
       if (which === 'admin') savePin(p1, !!localStorage.getItem(PIN_KEY));
       f.reset();
-      show('alert-ok', `${which === 'admin' ? 'Admin' : 'Monitor'} password updated.`);
-    } catch (err) { show('alert-error', err.message); }
+      show('alert-ok', `${{ admin: 'Admin', hr: 'HR', monitor: 'Monitor' }[which]} password updated.`);
+    } catch (err) {
+      if (/Invalid password type|too short/i.test(err.message || '')) {
+        $('#smsg').innerHTML = `<div class="alert alert-error">The database needs a one-time update to support the HR password. In Supabase open <b>SQL Editor → New query</b>, paste the script below, click <b>Run</b>, then save the password again.</div>
+          <section class="panel"><div class="panel-head"><h3>HR upgrade script</h3><button class="btn btn-outline btn-sm" id="copyHrSql">Copy script</button></div>
+          <pre class="panel-body" style="white-space:pre-wrap;font-size:12px;max-height:260px;overflow:auto;margin:0">${esc(HR_UPGRADE_SQL)}</pre></section>`;
+        $('#copyHrSql').onclick = async (ev) => { await navigator.clipboard.writeText(HR_UPGRADE_SQL); ev.target.textContent = 'Copied ✓'; };
+      } else show('alert-error', err.message);
+    }
   };
 }
 
@@ -1097,8 +1119,10 @@ function renderDashboard(main) {
       <h1>Live Attendance <span id="affTitle" style="color:var(--gold-dark)"></span></h1>
       <span class="live" id="live"><span class="dot"></span> <span>Connecting…</span></span>
       <button class="btn btn-outline btn-sm" id="refresh">↻ Refresh</button>
+      ${ME && ME.role === 'admin' ? '<button class="btn btn-danger btn-sm" id="clearNames" title="Delete all names and check-ins">🗑 Clear names</button>' : ''}
     </div>
-    ${ME && ME.role !== 'admin' ? `<div class="alert alert-info">Monitoring view (read-only) — ${ME.affiliate ? `you are assigned to <b>${esc(ME.affiliate)}</b>` : 'all affiliates'}. Exports include only what you can see.</div>` : ''}
+    ${ME && ME.role === 'hr' ? '<div class="alert alert-info">HR view — you can view and search names. Uploading and clearing are for the Admin only.</div>' : ''}
+    ${ME && ME.role === 'monitor' ? `<div class="alert alert-info">Monitoring view (read-only) — ${ME.affiliate ? `you are assigned to <b>${esc(ME.affiliate)}</b>` : 'all affiliates'}. Exports include only what you can see.</div>` : ''}
     <div id="loadErr"></div>
     <section class="kpis" id="kpis">${spinner}</section>
     <div class="grid-2">
@@ -1117,8 +1141,8 @@ function renderDashboard(main) {
     <section class="panel">
       <div class="panel-head">
         <h3>Attendance List <span id="count" style="color:var(--muted);font-weight:500"></span></h3>
-        <button class="btn btn-outline btn-sm" id="xlsxBtn">⬇ Excel</button>
-        <button class="btn btn-outline btn-sm" id="pdfBtn">⬇ PDF</button>
+        ${ME && ME.role === 'hr' ? '' : `<button class="btn btn-outline btn-sm" id="xlsxBtn">⬇ Excel</button>
+        <button class="btn btn-outline btn-sm" id="pdfBtn">⬇ PDF</button>`}
       </div>
       <div class="panel-body filters">
         <input class="input" id="q" type="search" placeholder="Search by name, employee ID, or affiliate…">
@@ -1255,8 +1279,14 @@ function renderDashboard(main) {
     if (!emp || !confirm(`Undo check-in for ${fullName(emp)}? They will be marked "Not Yet Arrived".`)) return;
     try { await adminRpc('admin_undo', { p_employee_id: emp.id }); poll(); } catch (err) { alert(err.message); }
   };
-  $('#xlsxBtn').onclick = () => runExport('xlsx');
-  $('#pdfBtn').onclick = () => runExport('pdf');
+  if ($('#xlsxBtn')) $('#xlsxBtn').onclick = () => runExport('xlsx');
+  if ($('#pdfBtn')) $('#pdfBtn').onclick = () => runExport('pdf');
+  if ($('#clearNames')) $('#clearNames').onclick = async () => {
+    if (prompt('This deletes ALL names in the masterlist and ALL check-ins. This cannot be undone.\n\nType CLEAR to confirm.') !== 'CLEAR') return;
+    const b = $('#clearNames'); b.disabled = true; b.textContent = 'Clearing…';
+    try { await adminRpc('admin_clear_all'); toast('All names and check-ins were cleared.'); route(); }
+    catch (err) { alert(err.message); b.disabled = false; b.textContent = '🗑 Clear names'; }
+  };
   async function runExport(kind) {
     const btn = kind === 'xlsx' ? $('#xlsxBtn') : $('#pdfBtn');
     const label = btn.textContent; btn.disabled = true; btn.textContent = 'Exporting…';
