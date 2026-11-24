@@ -195,9 +195,10 @@ const BANNER = 'data:image/jpeg;base64,/9j/4AAQSkZJRgABAQAAAQABAAD/2wBDAAQDAwMDA
 // One app for everyone: index.html = employee check-in, index.html#/admin = HR backend.
 // admin.html is only a shortcut that forwards to index.html#/admin.
 const APP_MODE = 'guest';
-// Address of the employee check-in page (what the QR code opens)
+// Address of the employee check-in page (what the QR code opens):
+// always index.html on the check-in screen (choose affiliate → name → submit)
 function guestUrl() {
-  return pageUrl().replace(/\/index\.html$/, '') + '/';
+  return pageUrl().replace(/\/index\.html$/, '') + '/index.html#/checkin';
 }
 // Address of the HR / monitor login
 function adminUrl() {
