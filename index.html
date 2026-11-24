@@ -183,8 +183,9 @@ code{background:#f3f4f8;padding:1px 6px;border-radius:6px;font-size:.92em}
 const CONFIG = {
   SUPABASE_URL: 'https://frhnzfobujepoxqtdkqw.supabase.co',        // e.g. 'https://abcdefgh.supabase.co'
   SUPABASE_ANON_KEY: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImZyaG56Zm9idWplcG94cXRka3F3Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTU0ODE0MzMsImV4cCI6MjExMTA1NzQzM30.OWtgZNusxyqvq-uBoCe94qcjzH_qARwDFTJXj0O29Bo',   // Supabase → Project Settings → API → anon public key
-  SITE_URL: '',
-  HR_ACCESS_PASSWORD: 'HR',  // used by the one-tap "HR access" button; must match the HR password on the Passwords page            // Optional: final hosted URL of this page (used for the QR code)
+  SITE_URL: '',            // Optional: final hosted URL of this page (used for the QR code)
+  // Used by the one-tap "HR access" button. Set up automatically the first time the Admin logs in.
+  HR_ACCESS_PASSWORD: 'pgb-hr-access-2026',
   EVENT_NAME: 'A Symphony of 75 Years',
   EVENT_SUBTITLE: 'The PGB Christmas Party Celebration',
   EVENT_DATE: 'December 4, 2026',
@@ -896,8 +897,11 @@ async function renderAdmin(h, rid) {
     return;
   }
   if (!role) { clearPin(); return renderPinLogin('Password changed or incorrect. Please log in again.'); }
-  ME = { role, full_name: role === 'admin' ? 'Admin' : role === 'hr' ? 'HR' : 'Monitor', email: '', affiliate: null };
-  const isAdmin = role === 'admin', isHr = role === 'hr';
+  let role2 = role;
+  if (role !== 'admin' && pin === CONFIG.HR_ACCESS_PASSWORD) role2 = 'hr'; // came in through the HR access button
+  if (role === 'admin') ensureHrAccess(); // first Admin login turns on the HR access button
+  ME = { role: role2, full_name: role2 === 'admin' ? 'Admin' : role2 === 'hr' ? 'HR' : 'Monitor', email: '', affiliate: null };
+  const isAdmin = role2 === 'admin', isHr = role2 === 'hr';
 
   const pages = { 'admin/upload': 'upload', 'admin/qr': 'qr', 'admin/settings': 'settings' };
   let page = pages[h] || 'dash';
@@ -914,10 +918,10 @@ async function renderAdmin(h, rid) {
       <div class="brand"><span class="b1">PRIMARY GROUP OF BUILDERS</span><span class="b2">Christmas Party Attendance</span></div>
       <nav class="admin-nav">
         ${nav.map(([k, href, l]) => `<a href="${href}" class="${k === page ? 'active' : ''}">${l}</a>`).join('')}
-        <a href="${esc(guestUrl())}" target="_blank" rel="noopener" title="Open the employee check-in page">Check-in page ↗</a>
+        ${isHr ? '' : `<a href="${esc(guestUrl())}" target="_blank" rel="noopener" title="Open the employee check-in page">Check-in page ↗</a>`}
         <button id="signOut">Log out</button>
       </nav>
-      <div class="whoami"><span class="role-chip ${isAdmin ? 'admin' : ''}">${ROLE_LABEL[role] || role}</span></div>
+      <div class="whoami"><span class="role-chip ${isAdmin ? 'admin' : ''}">${ROLE_LABEL[role2] || role2}</span></div>
     </div>
   </header>
   <main class="admin-main" id="adminMain"></main>`;
@@ -927,6 +931,18 @@ async function renderAdmin(h, rid) {
   else if (page === 'settings') renderSettings(main);
   else if (page === 'qr') renderQr(main);
   else renderDashboard(main);
+}
+
+/* Makes the one-tap HR access work: saves CONFIG.HR_ACCESS_PASSWORD as the HR password
+   (or, on databases without the HR role yet, as the view-only Monitor password). Runs on Admin login. */
+async function ensureHrAccess() {
+  try {
+    const { data: r } = await sb.rpc('pin_role', { p_pin: CONFIG.HR_ACCESS_PASSWORD });
+    if (r === 'hr' || r === 'monitor') return;
+    let { error } = await sb.rpc('admin_change_pin', { p_pin: getPin(), p_which: 'hr', p_new: CONFIG.HR_ACCESS_PASSWORD });
+    if (error) ({ error } = await sb.rpc('admin_change_pin', { p_pin: getPin(), p_which: 'monitor', p_new: CONFIG.HR_ACCESS_PASSWORD }));
+    if (!error) toast('HR access is now turned on. The HR access button opens the dashboard.');
+  } catch (_) {}
 }
 
 /* HR access without database setup: view and search all names (no check-in status). */
@@ -942,6 +958,7 @@ async function renderHrNames() {
   </header>
   <main class="admin-main">
     <div class="page-title"><h1>Employee Names</h1><span class="live" id="hcount">…</span></div>
+    <div class="alert alert-info">The full HR dashboard (with check-in status) turns on automatically the next time the Admin logs in.</div>
     <section class="panel">
       <div class="panel-body filters">
         <input class="input" id="hq" type="search" placeholder="Search by name, affiliate, or department…">
@@ -1010,7 +1027,7 @@ function renderPinLogin(notice = '') {
     const { data: role, error } = await sb.rpc('pin_role', { p_pin: CONFIG.HR_ACCESS_PASSWORD });
     b.disabled = false; b.textContent = 'HR access';
     if (error) return error.code === 'PGRST202' ? renderUpgrade() : showErr(`Connection problem: ${esc(error.message)}`);
-    if (role !== 'hr') return renderHrNames(); // HR password not set up yet: open the names list anyway
+    if (role !== 'hr' && role !== 'monitor') return renderHrNames(); // not set up yet: open the names list anyway
     enter(CONFIG.HR_ACCESS_PASSWORD, false);
   };
   $('#pinForm').onsubmit = async (e) => {
@@ -1034,7 +1051,7 @@ function renderSettings(main) {
       <div class="panel-head"><h3>Change a password</h3></div>
       <form class="panel-body" id="pwForm" style="display:grid;gap:12px;max-width:440px">
         <div><label class="label">Which password</label>
-          <select class="select" name="which"><option value="admin">Admin (full access)</option><option value="hr">HR (view &amp; search names only) — keep as ${esc(CONFIG.HR_ACCESS_PASSWORD)} for the HR access button</option><option value="monitor">Monitor (view only)</option></select></div>
+          <select class="select" name="which"><option value="admin">Admin (full access)</option><option value="hr">HR (view &amp; search names only)</option><option value="monitor">Monitor (view only)</option></select></div>
         <div><label class="label">New password</label><input class="input" name="p1" type="password" required></div>
         <div><label class="label">Type it again</label><input class="input" name="p2" type="password" required></div>
         <button class="btn btn-gold">Save new password</button>
