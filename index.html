@@ -929,6 +929,54 @@ async function renderAdmin(h, rid) {
   else renderDashboard(main);
 }
 
+/* HR access without database setup: view and search all names (no check-in status). */
+async function renderHrNames() {
+  document.body.className = 'mode-admin';
+  app.innerHTML = `
+  <header class="admin-header">
+    <div class="admin-header-inner">
+      <div class="brand"><span class="b1">PRIMARY GROUP OF BUILDERS</span><span class="b2">Christmas Party Attendance</span></div>
+      <nav class="admin-nav"><button id="signOut">Log out</button></nav>
+      <div class="whoami"><span class="role-chip">${ROLE_LABEL.hr}</span></div>
+    </div>
+  </header>
+  <main class="admin-main">
+    <div class="page-title"><h1>Employee Names</h1><span class="live" id="hcount">…</span></div>
+    <section class="panel">
+      <div class="panel-body filters">
+        <input class="input" id="hq" type="search" placeholder="Search by name, affiliate, or department…">
+        <select class="select" id="haff"><option value="All">All affiliates</option></select>
+      </div>
+      <div class="table-wrap"><table class="t">
+        <thead><tr><th>Employee Name</th><th>Affiliate</th><th class="hide-sm">Department</th></tr></thead>
+        <tbody id="hbody"><tr><td colspan="3">${spinner}</td></tr></tbody>
+      </table></div>
+    </section>
+  </main>`;
+  $('#signOut').onclick = () => { history.replaceState(null, '', location.pathname + location.search + '#/admin'); route(); };
+  let all = [];
+  const draw = () => {
+    const q = $('#hq').value.trim().toLowerCase(), aff = $('#haff').value;
+    const rows = all.filter((e) => (aff === 'All' || e.affiliate === aff) &&
+      (!q || `${e.last_name} ${e.first_name} ${e.affiliate} ${e.department || ''}`.toLowerCase().includes(q)));
+    $('#hcount').textContent = `${rows.length} of ${all.length} names`;
+    $('#hbody').innerHTML = rows.length
+      ? rows.slice(0, 1000).map((e) => `<tr><td>${esc(fullName(e))}</td><td>${esc(e.affiliate)}</td><td class="hide-sm">${esc(e.department || '')}</td></tr>`).join('')
+      : '<tr><td colspan="3" style="color:var(--muted)">No names found.</td></tr>';
+  };
+  try {
+    const affs = (await fetchAll(() => sb.rpc('get_affiliates'))).map((r) => r.affiliate);
+    $('#haff').innerHTML += affs.map((a) => `<option>${esc(a)}</option>`).join('');
+    const lists = await Promise.all(affs.map((a) => fetchAll(() => sb.rpc('get_employees_by_affiliate', { p_affiliate: a }))
+      .then((rows) => rows.map((r) => ({ ...r, affiliate: a })))));
+    all = lists.flat().sort((x, y) => fullName(x).localeCompare(fullName(y)));
+    draw();
+  } catch (e) {
+    $('#hbody').innerHTML = `<tr><td colspan="3"><div class="alert alert-error">${esc(e.message || e)}</div></td></tr>`;
+  }
+  $('#hq').oninput = draw; $('#haff').onchange = draw;
+}
+
 function renderPinLogin(notice = '') {
   document.body.className = 'mode-login';
   app.innerHTML = `
@@ -962,7 +1010,7 @@ function renderPinLogin(notice = '') {
     const { data: role, error } = await sb.rpc('pin_role', { p_pin: CONFIG.HR_ACCESS_PASSWORD });
     b.disabled = false; b.textContent = 'HR access';
     if (error) return error.code === 'PGRST202' ? renderUpgrade() : showErr(`Connection problem: ${esc(error.message)}`);
-    if (role !== 'hr') return showErr('HR access is not set up yet. The Admin needs to set the HR password on the Passwords page.');
+    if (role !== 'hr') return renderHrNames(); // HR password not set up yet: open the names list anyway
     enter(CONFIG.HR_ACCESS_PASSWORD, false);
   };
   $('#pinForm').onsubmit = async (e) => {
