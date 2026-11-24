@@ -734,7 +734,7 @@ function renderCheckin() {
       <div id="err"></div>
       <div style="margin-top:18px"><button class="btn btn-gold btn-block" id="submitBtn" disabled>Submit</button></div>
     </section>
-    <p class="footer-note">Can’t find your name? Please approach the registration desk.<br>© ${new Date().getFullYear()} ${esc(CONFIG.COMPANY)}<br><a href="#/admin" style="color:inherit;opacity:.6;font-size:.85em">Organizer login</a></p>
+    <p class="footer-note">Can’t find your name? Please approach the registration desk.<br>© ${new Date().getFullYear()} ${esc(CONFIG.COMPANY)}</p>
   </main>`;
 
   const st = { employees: [], selected: null, busy: false, token: 0 };
@@ -923,7 +923,7 @@ function renderPinLogin(notice = '') {
   <div class="login-wrap">
     <form class="card login-card" id="pinForm">
       <img src="${BANNER}" alt="" style="width:100%;border-radius:12px;display:block;margin-bottom:14px">
-      <h1 class="title">Admin Login</h1>
+      <h1 class="title">Staff Login</h1>
       <p class="sub">${esc(CONFIG.EVENT_SUBTITLE)} · ${esc(CONFIG.EVENT_DATE)}</p>
       ${notice ? `<div class="alert alert-info" style="margin-bottom:12px">${esc(notice)}</div>` : ''}
       <label class="label" for="pin">Password</label>
