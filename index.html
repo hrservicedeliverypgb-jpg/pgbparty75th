@@ -148,12 +148,10 @@ tr.clickable{cursor:pointer}tr.clickable:hover td{background:#fafaf5}tr.active-a
 .dropzone{border:2px dashed #cbd5e1;border-radius:var(--radius);padding:32px;text-align:center;background:#fafbfd;cursor:pointer;transition:border .15s,background .15s}
 .dropzone:hover,.dropzone.drag{border-color:var(--gold);background:#fffbef}
 .form-row{display:grid;grid-template-columns:repeat(5,1fr) auto;gap:10px;align-items:end}
-.qr-poster{max-width:520px;margin:0 auto;background:linear-gradient(180deg,var(--navy-800),var(--navy-900));border-radius:22px;overflow:hidden;color:#fff;text-align:center;border:2px solid var(--gold)}
-.qr-poster img.bn{width:100%;display:block}
-.qr-box{background:#fff;margin:22px auto 8px;padding:14px;border-radius:16px;width:74%}
+.qr-poster{max-width:520px;margin:0 auto;background-color:#010b26;background-image:radial-gradient(circle at 9% 18%,rgba(255,255,255,.55) 0 1.2px,transparent 2px),radial-gradient(circle at 91% 30%,rgba(255,255,255,.45) 0 1px,transparent 2px),radial-gradient(circle at 6% 72%,rgba(243,210,122,.5) 0 1.3px,transparent 2.2px),radial-gradient(circle at 94% 82%,rgba(255,255,255,.4) 0 1px,transparent 2px),radial-gradient(circle at 50% 97%,rgba(243,210,122,.35) 0 1px,transparent 2px);border-radius:22px;overflow:hidden;color:#fff;text-align:center;border:2px solid var(--gold)}
+.qr-poster img.bn{width:100%;display:block;-webkit-mask-image:linear-gradient(#000 82%,transparent);mask-image:linear-gradient(#000 82%,transparent)}
+.qr-box{background:#fff;margin:22px auto 30px;padding:14px;border-radius:16px;width:74%}
 .qr-box img{width:100%;display:block}
-.cta{font-size:22px;font-weight:800;color:var(--gold-light);margin:12px 0 4px;letter-spacing:.04em}
-.qsteps{font-size:14px;color:rgba(255,255,255,.8);padding:0 24px 24px}
 .url-box{font-family:ui-monospace,monospace;font-size:13px;background:#f3f4f8;padding:10px 12px;border-radius:10px;word-break:break-all;flex:1}
 .setup{max-width:900px;margin:0 auto;padding:24px 16px}
 .setup ol li{margin-bottom:10px;line-height:1.5}
@@ -1846,8 +1844,6 @@ async function renderQr(main) {
     <div class="qr-poster">
       <img class="bn" src="${BANNER}" alt="">
       <div class="qr-box" id="qrBox">${spinner}</div>
-      <div class="cta">SCAN TO CHECK IN</div>
-      <div class="qsteps">1. Scan with your phone camera · 2. Choose your affiliate · 3. Select your name · 4. Submit<br><br>${esc(CONFIG.EVENT_DATE)}</div>
     </div>`;
   $('#copyUrl').onclick = async (e) => { await navigator.clipboard.writeText(url); e.target.textContent = 'Copied ✓'; };
   try {
