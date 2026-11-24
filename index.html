@@ -1328,7 +1328,7 @@ function renderDashboard(main) {
         <td class="hide-sm" style="text-align:right">${p && ME && ME.role === 'admin' ? `<button class="btn btn-danger btn-sm" data-undo="${e.id}">Undo</button>` : ''}</td>
       </tr>`;
     }).join('') : '<tr><td colspan="6" class="empty">No matching employees.</td></tr>';
-    $('#xlsxBtn').disabled = $('#pdfBtn').disabled = rows.length === 0;
+    for (const id of ['#xlsxBtn', '#pdfBtn']) if ($(id)) $(id).disabled = rows.length === 0;
   }
 
   function setLive(s) {
