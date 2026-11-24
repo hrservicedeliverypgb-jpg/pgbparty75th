@@ -139,6 +139,7 @@ tr.clickable{cursor:pointer}tr.clickable:hover td{background:#fafaf5}tr.active-a
 .toast b{color:var(--gold-light)}
 .login-wrap{min-height:100dvh;display:grid;place-items:center;padding:20px}
 .login-card{width:100%;max-width:400px}
+.login-type{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin:4px 0 14px}.login-type button{padding:11px 8px;border-radius:10px;border:2px solid var(--gold);background:#fff;color:var(--navy-800);font-weight:700;font-size:15px;cursor:pointer}.login-type button.on{background:var(--gold);color:var(--navy-900)}
 .login-links{display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap;margin-top:14px;font-size:13px}.login-links a{color:var(--navy-700);font-weight:600}
 .whoami{width:100%;font-size:12px;color:rgba(255,255,255,.7);text-align:right;margin-top:-6px}
 .role-chip{display:inline-block;margin-left:6px;padding:2px 8px;border-radius:999px;background:rgba(255,255,255,.12);color:#fff;font-weight:700}
@@ -734,7 +735,7 @@ function renderCheckin() {
       <div id="err"></div>
       <div style="margin-top:18px"><button class="btn btn-gold btn-block" id="submitBtn" disabled>Submit</button></div>
     </section>
-    <p class="footer-note">Can’t find your name? Please approach the registration desk.<br>© ${new Date().getFullYear()} ${esc(CONFIG.COMPANY)}<br><a href="#/admin" style="color:inherit;opacity:.6;font-size:.85em">Organizer login</a></p>
+    <p class="footer-note">Can’t find your name? Please approach the registration desk.<br>© ${new Date().getFullYear()} ${esc(CONFIG.COMPANY)}</p>
   </main>`;
 
   const st = { employees: [], selected: null, busy: false, token: 0 };
@@ -923,10 +924,14 @@ function renderPinLogin(notice = '') {
   <div class="login-wrap">
     <form class="card login-card" id="pinForm">
       <img src="${BANNER}" alt="" style="width:100%;border-radius:12px;display:block;margin-bottom:14px">
-      <h1 class="title">Admin Login</h1>
+      <h1 class="title">Staff Login</h1>
       <p class="sub">${esc(CONFIG.EVENT_SUBTITLE)} · ${esc(CONFIG.EVENT_DATE)}</p>
       ${notice ? `<div class="alert alert-info" style="margin-bottom:12px">${esc(notice)}</div>` : ''}
-      <label class="label" for="pin">Password</label>
+      <div class="login-type" role="group" aria-label="Login as">
+        <button type="button" data-type="admin">Admin</button>
+        <button type="button" data-type="hr">HR access</button>
+      </div>
+      <label class="label" for="pin" id="pinLabel">Password</label>
       <input class="input" id="pin" type="password" autocomplete="current-password" required autofocus>
       <label style="display:flex;gap:8px;align-items:center;margin-top:12px;font-size:14px;color:#374151">
         <input type="checkbox" id="remember" checked> Keep me logged in on this device
@@ -935,6 +940,15 @@ function renderPinLogin(notice = '') {
       <button class="btn btn-gold btn-block" style="margin-top:16px" id="pbtn">Log in</button>
     </form>
   </div>`;
+  let loginType = 'admin';
+  const setType = (t) => {
+    loginType = t;
+    app.querySelectorAll('.login-type button').forEach((b) => b.classList.toggle('on', b.dataset.type === t));
+    $('#pinLabel').textContent = t === 'hr' ? 'HR password' : 'Admin password';
+    $('#perr').innerHTML = ''; $('#pin').focus();
+  };
+  app.querySelectorAll('.login-type button').forEach((b) => (b.onclick = () => setType(b.dataset.type)));
+  setType(loginType);
   setTimeout(() => $('#pin') && $('#pin').focus(), 50);
   $('#pinForm').onsubmit = async (e) => {
     e.preventDefault();
@@ -947,7 +961,8 @@ function renderPinLogin(notice = '') {
       if (error.code === 'PGRST202') return renderUpgrade();
       $('#perr').innerHTML = `<div class="alert alert-error" style="margin-top:12px">Connection problem: ${esc(error.message)}</div>`; return;
     }
-    if (!role) { $('#perr').innerHTML = '<div class="alert alert-error" style="margin-top:12px">Wrong password. Please try again.</div>'; $('#pin').select(); return; }
+    const allowed = loginType === 'hr' ? ['hr', 'monitor'] : ['admin'];
+    if (!role || !allowed.includes(role)) { $('#perr').innerHTML = `<div class="alert alert-error" style="margin-top:12px">Wrong ${loginType === 'hr' ? 'HR' : 'Admin'} password. Please try again.</div>`; $('#pin').select(); return; }
     savePin(p, $('#remember').checked);
     if (!location.hash.startsWith('#/admin')) history.replaceState(null, '', location.pathname + location.search + '#/admin');
     route();
