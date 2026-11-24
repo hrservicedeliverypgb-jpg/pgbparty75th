@@ -1,0 +1,21 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>PGB Attendance — Admin</title>
+<script>
+  // Shortcut to the HR / monitor side of the same app (index.html#/admin).
+  // Keeps any #/admin/... page or sign-in link details in the address.
+  (function () {
+    var h = location.hash || '';
+    var keep = h.indexOf('#/admin') === 0 || /access_token=|error_description=|type=recovery/.test(h);
+    location.replace('./index.html' + location.search + (keep ? h : '#/admin'));
+  })();
+</script>
+<style>body{margin:0;min-height:100vh;display:grid;place-items:center;font-family:system-ui,sans-serif;background:#0b1838;color:#fff}a{color:#e6c46a}</style>
+</head>
+<body>
+<p>Opening the admin page… <a href="./index.html#/admin">Click here</a> if nothing happens.</p>
+</body>
+</html>
