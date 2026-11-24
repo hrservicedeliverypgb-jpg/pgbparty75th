@@ -843,17 +843,16 @@ function showResult(kind, r, onDone) {
         <h1 class="rise d1">Welcome!</h1>
         <div class="who rise d2">${esc(r.name)} is here!</div>
         <div class="aff rise d2">${esc(r.affiliate)}</div>
-        <p class="thanks rise d3">Thank you for attending our Christmas Party.</p>
         <p class="rtime rise d3">Checked in at ${fmtTime(r.checked_in_at)}</p>` : `
         <div class="who rise d1" style="margin-top:18px">Attendance already recorded.</div>
         <div class="aff rise d2">${esc(r.name)} · ${esc(r.affiliate)}</div>
         <p class="thanks rise d3">You checked in at ${fmtTime(r.checked_in_at)}. Enjoy the celebration!</p>
         <p class="rtime rise d3">If this wasn’t you, please approach the registration desk.</p>`}
-      <div class="rise d4"><button class="btn btn-ghost" id="doneBtn">Check in another guest</button></div>
+      ${welcome ? '' : '<div class="rise d4"><button class="btn btn-ghost" id="doneBtn">Back</button></div>'}
     </div>`;
   document.body.appendChild(el);
   if (welcome && navigator.vibrate) navigator.vibrate([60, 40, 60]);
-  $('#doneBtn', el).onclick = () => { el.remove(); onDone(); };
+  if ($('#doneBtn', el)) $('#doneBtn', el).onclick = () => { el.remove(); onDone(); };
 }
 
 /* =========================== ADMIN =========================== */
