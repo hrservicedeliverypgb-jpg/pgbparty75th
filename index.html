@@ -141,7 +141,7 @@ tr.clickable{cursor:pointer}tr.clickable:hover td{background:#fafaf5}tr.active-a
 .toast b{color:var(--gold-light)}
 .login-wrap{min-height:100dvh;display:grid;place-items:center;padding:20px}
 .login-card{width:100%;max-width:400px}
-.login-type{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin:4px 0 14px}.login-type button{padding:11px 8px;border-radius:10px;border:2px solid var(--gold);background:#fff;color:var(--navy-800);font-weight:700;font-size:15px;cursor:pointer}.login-type button.on{background:var(--gold);color:var(--navy-900)}
+.login-type{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin:4px 0 14px}.login-type button{padding:11px 8px;border-radius:10px;border:2px solid var(--gold);background:#fff;color:var(--navy-800);font-weight:700;font-size:15px;cursor:pointer}.login-type button.on{background:var(--gold);color:var(--navy-900)}.login-type #hrBtn{background:#fff6d6;border-color:#f3d27a}.login-type #hrBtn.on{background:#fbe7a6;border-color:var(--gold)}
 .login-links{display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap;margin-top:14px;font-size:13px}.login-links a{color:var(--navy-700);font-weight:600}
 .whoami{width:100%;font-size:12px;color:rgba(255,255,255,.7);text-align:right;margin-top:-6px}
 .role-chip{display:inline-block;margin-left:6px;padding:2px 8px;border-radius:999px;background:rgba(255,255,255,.12);color:#fff;font-weight:700}
@@ -1002,14 +1002,17 @@ function renderPinLogin(notice = '') {
       <img src="${BANNER}" alt="" style="width:100%;border-radius:12px;display:block;margin-bottom:14px">
       ${notice ? `<div class="alert alert-info" style="margin-bottom:12px">${esc(notice)}</div>` : ''}
       <div class="login-type" role="group" aria-label="Open as">
-        <button type="button" class="on" data-type="admin">Admin</button>
+        <button type="button" class="on" id="adminBtn">Admin</button>
         <button type="button" id="hrBtn">HR access</button>
       </div>
-      <label class="label" for="pin">Admin password</label>
-      <input class="input" id="pin" type="password" autocomplete="current-password" required autofocus>
-      <label style="display:flex;gap:8px;align-items:center;margin-top:12px;font-size:14px;color:#374151">
-        <input type="checkbox" id="remember" checked> Keep me logged in on this device
-      </label>
+      <div id="adminFields">
+        <label class="label" for="pin">Admin password</label>
+        <input class="input" id="pin" type="password" autocomplete="current-password" required autofocus>
+        <label style="display:flex;gap:8px;align-items:center;margin-top:12px;font-size:14px;color:#374151">
+          <input type="checkbox" id="remember" checked> Keep me logged in on this device
+        </label>
+      </div>
+      <div id="hrOpening" hidden style="display:flex;gap:10px;align-items:center;justify-content:center;color:var(--muted);padding:14px 0"><div class="spinner"></div> Opening HR dashboard…</div>
       <div id="perr"></div>
       <button class="btn btn-gold btn-block" style="margin-top:16px" id="pbtn">Log in</button>
     </form>
@@ -1021,11 +1024,22 @@ function renderPinLogin(notice = '') {
     if (!location.hash.startsWith('#/admin')) history.replaceState(null, '', location.pathname + location.search + '#/admin');
     route();
   };
-  // HR access: one tap, no password to type
+  // Admin tab: password field.  HR tab: no password, opens right away.
+  const showMode = (hr) => {
+    $('#adminBtn').classList.toggle('on', !hr); $('#hrBtn').classList.toggle('on', hr);
+    $('#adminFields').hidden = hr; $('#pbtn').hidden = hr; $('#hrOpening').hidden = !hr;
+    $('#hrOpening').style.display = hr ? 'flex' : 'none';
+    $('#pin').required = !hr; $('#perr').innerHTML = '';
+    if (!hr) $('#pin').focus();
+  };
+  $('#hrOpening').style.display = 'none';
+  $('#adminBtn').onclick = () => showMode(false);
   $('#hrBtn').onclick = async () => {
-    const b = $('#hrBtn'); b.disabled = true; b.textContent = 'Opening…';
+    showMode(true);
+    const b = $('#hrBtn'); b.disabled = true;
     const { data: role, error } = await sb.rpc('pin_role', { p_pin: CONFIG.HR_ACCESS_PASSWORD });
-    b.disabled = false; b.textContent = 'HR access';
+    b.disabled = false;
+    if (error || (role !== 'hr' && role !== 'monitor')) { $('#hrOpening').style.display = 'none'; }
     if (error) return error.code === 'PGRST202' ? renderUpgrade() : showErr(`Connection problem: ${esc(error.message)}`);
     if (role !== 'hr' && role !== 'monitor') return renderHrNames(); // not set up yet: open the names list anyway
     enter(CONFIG.HR_ACCESS_PASSWORD, false);
