@@ -154,6 +154,19 @@ tr.clickable{cursor:pointer}tr.clickable:hover td{background:#fafaf5}tr.active-a
 .qr-poster img.bn{width:100%;display:block;-webkit-mask-image:linear-gradient(#000 82%,transparent);mask-image:linear-gradient(#000 82%,transparent)}
 .qr-box{background:#fff;margin:22px auto 0;position:relative;z-index:1;padding:14px;border-radius:16px;width:74%}
 .qr-box img{width:100%;display:block}
+.raffle-grid{display:grid;grid-template-columns:minmax(0,1.5fr) minmax(0,1fr);gap:18px;align-items:start}
+@media(max-width:900px){.raffle-grid{grid-template-columns:1fr}}
+.wheel-stage{background:radial-gradient(600px 400px at 50% 40%,#12234d,#010b26);border-radius:var(--radius);padding:22px 16px 24px;text-align:center;border:2px solid var(--gold)}
+.wheel-wrap{position:relative;width:min(100%,560px);margin:0 auto;aspect-ratio:1}
+.wheel-wrap canvas{width:100%;height:100%;display:block}
+.wheel-pointer{position:absolute;left:50%;top:-6px;transform:translateX(-50%);width:0;height:0;border-left:18px solid transparent;border-right:18px solid transparent;border-top:34px solid var(--gold-light);filter:drop-shadow(0 3px 4px rgba(0,0,0,.5));z-index:2}
+.wheel-ticker{margin:16px auto 4px;min-height:40px;font-size:24px;font-weight:800;color:#fff;letter-spacing:.02em}
+.wheel-ticker small{display:block;font-size:13px;font-weight:600;color:var(--gold-light)}
+.spin-btn{font-size:20px;padding:14px 46px;margin-top:10px}
+.winners{list-style:none;margin:0;padding:0;max-height:420px;overflow:auto}
+.winners li{display:flex;gap:10px;align-items:center;padding:10px 18px;border-bottom:1px solid var(--line)}
+.winners li b{flex:1}.winners .n{width:26px;height:26px;border-radius:50%;background:var(--gold);color:var(--navy-900);display:grid;place-items:center;font-size:12px;font-weight:800;flex:none}
+.winner-modal .who{font-size:clamp(28px,6vw,52px)}
 .url-box{font-family:ui-monospace,monospace;font-size:13px;background:#f3f4f8;padding:10px 12px;border-radius:10px;word-break:break-all;flex:1}
 .setup{max-width:900px;margin:0 auto;padding:24px 16px}
 .setup ol li{margin-bottom:10px;line-height:1.5}
@@ -903,12 +916,13 @@ async function renderAdmin(h, rid) {
   ME = { role: role2, full_name: role2 === 'admin' ? 'Admin' : role2 === 'hr' ? 'HR' : 'Monitor', email: '', affiliate: null };
   const isAdmin = role2 === 'admin', isHr = role2 === 'hr';
 
-  const pages = { 'admin/upload': 'upload', 'admin/qr': 'qr', 'admin/settings': 'settings' };
+  const pages = { 'admin/upload': 'upload', 'admin/qr': 'qr', 'admin/settings': 'settings', 'admin/raffle': 'raffle' };
   let page = pages[h] || 'dash';
-  if (!isAdmin && (page === 'upload' || page === 'settings')) page = 'dash';
+  if (!isAdmin && (page === 'upload' || page === 'settings' || page === 'raffle')) page = 'dash';
   if (isHr) page = 'dash'; // HR: view and search names only
   const nav = [['dash', '#/admin', 'Dashboard']];
   if (isAdmin) nav.push(['upload', '#/admin/upload', 'Masterlist']);
+  if (isAdmin) nav.push(['raffle', '#/admin/raffle', 'Raffle']);
   if (!isHr) nav.push(['qr', '#/admin/qr', 'Event QR']);
   if (isAdmin) nav.push(['settings', '#/admin/settings', 'Passwords']);
 
@@ -930,6 +944,7 @@ async function renderAdmin(h, rid) {
   if (page === 'upload') renderUpload(main);
   else if (page === 'settings') renderSettings(main);
   else if (page === 'qr') renderQr(main);
+  else if (page === 'raffle') renderRaffle(main);
   else renderDashboard(main);
 }
 
@@ -1925,6 +1940,189 @@ function renderPersonnel(main) {
   $('#copyLogin').onclick = (e) => copy(loginLink, e.target);
   $('#copyMsg').onclick = (e) => copy(instructions, e.target);
 
+  load();
+}
+
+/* --------------------------- Raffle (wheel of names) --------------------------- */
+const RAFFLE_KEY = 'pgb-raffle-winners';
+function loadWinners() { try { return JSON.parse(localStorage.getItem(RAFFLE_KEY) || '[]'); } catch (_) { return []; } }
+function saveWinners(w) { try { localStorage.setItem(RAFFLE_KEY, JSON.stringify(w)); } catch (_) {} }
+function randomInt(n) { const a = new Uint32Array(1); crypto.getRandomValues(a); return a[0] % n; }
+
+async function renderRaffle(main) {
+  const myRoute = routeId;
+  main.innerHTML = `
+    <div class="page-title">
+      <h1>Raffle 🎁</h1>
+      <span class="live" id="rcount">…</span>
+      <button class="btn btn-outline btn-sm" id="rReload" title="Add guests who checked in since this page opened">↻ Refresh names</button>
+    </div>
+    <div id="rmsg"></div>
+    <div class="raffle-grid">
+      <section class="wheel-stage">
+        <div class="wheel-wrap"><div class="wheel-pointer"></div><canvas id="wheel"></canvas></div>
+        <div class="wheel-ticker" id="ticker">&nbsp;</div>
+        <button class="btn btn-gold spin-btn" id="spin" disabled>SPIN</button>
+      </section>
+      <div style="display:grid;gap:18px">
+        <section class="panel">
+          <div class="panel-head"><h3>Who is in the draw</h3></div>
+          <div class="panel-body" style="display:grid;gap:12px">
+            <div><label class="label" for="rAff">Affiliate</label>
+              <select class="select" id="rAff"><option value="All">All affiliates (present only)</option></select></div>
+            <label style="display:flex;gap:8px;align-items:center;font-size:14px">
+              <input type="checkbox" id="rRemove" checked> Remove each winner from the wheel</label>
+            <p style="margin:0;font-size:13px;color:var(--muted)">Only employees marked <b>Present</b> are on the wheel.</p>
+          </div>
+        </section>
+        <section class="panel">
+          <div class="panel-head"><h3>Winners <span id="wcount" style="color:var(--muted);font-weight:500"></span></h3>
+            <button class="btn btn-outline btn-sm" id="wCopy">Copy</button>
+            <button class="btn btn-danger btn-sm" id="wReset">Reset</button></div>
+          <ul class="winners" id="wlist"></ul>
+        </section>
+      </div>
+    </div>`;
+
+  const COLORS = ['#0b1838', '#d4a537', '#8b1e2d', '#14532d', '#1d3470', '#a87b1c'];
+  const canvas = $('#wheel'), ctx = canvas.getContext('2d');
+  let present = [], pool = [], winners = loadWinners(), rot = 0, spinning = false;
+  const label = (e) => fullName(e);
+
+  const rebuild = () => {
+    const aff = $('#rAff').value, won = new Set(winners.map((w) => w.id));
+    pool = present.filter((e) => (aff === 'All' || e.affiliate === aff) && !($('#rRemove').checked && won.has(e.id)));
+    $('#rcount').textContent = `${pool.length} name${pool.length === 1 ? '' : 's'} in the draw`;
+    $('#spin').disabled = spinning || pool.length < 1;
+    draw(); drawWinners(); tick();
+  };
+
+  function draw() {
+    const css = canvas.clientWidth || 500, dpr = window.devicePixelRatio || 1;
+    if (canvas.width !== Math.round(css * dpr)) { canvas.width = canvas.height = Math.round(css * dpr); }
+    const W = canvas.width, R = W / 2 - 6 * dpr, c = W / 2;
+    ctx.clearRect(0, 0, W, W);
+    ctx.save(); ctx.translate(c, c);
+    // rim
+    ctx.beginPath(); ctx.arc(0, 0, R + 4 * dpr, 0, Math.PI * 2); ctx.fillStyle = '#d4a537'; ctx.fill();
+    const n = pool.length;
+    if (!n) {
+      ctx.beginPath(); ctx.arc(0, 0, R, 0, Math.PI * 2); ctx.fillStyle = '#0b1838'; ctx.fill();
+      ctx.fillStyle = '#f3d27a'; ctx.font = `600 ${16 * dpr}px Inter,sans-serif`; ctx.textAlign = 'center';
+      ctx.fillText('No checked-in names yet', 0, 6 * dpr);
+    } else {
+      const seg = (Math.PI * 2) / n;
+      const showText = n <= 120, fs = Math.max(8, Math.min(18, (seg * R * 0.55) / dpr)) * dpr;
+      for (let i = 0; i < n; i++) {
+        const a0 = rot + i * seg - Math.PI / 2, col = COLORS[n % COLORS.length === 1 && i === n - 1 ? 2 : i % COLORS.length];
+        ctx.beginPath(); ctx.moveTo(0, 0); ctx.arc(0, 0, R, a0, a0 + seg); ctx.closePath();
+        ctx.fillStyle = col; ctx.fill();
+        if (n <= 300) { ctx.strokeStyle = 'rgba(255,255,255,.18)'; ctx.lineWidth = 1 * dpr; ctx.stroke(); }
+        if (showText) {
+          ctx.save(); ctx.rotate(a0 + seg / 2);
+          ctx.fillStyle = col === '#d4a537' || col === '#a87b1c' ? '#0b1838' : '#fff';
+          ctx.font = `700 ${fs}px Inter,sans-serif`; ctx.textAlign = 'right'; ctx.textBaseline = 'middle';
+          let t = label(pool[i]); const maxW = R * 0.66;
+          while (t.length > 3 && ctx.measureText(t).width > maxW) t = t.slice(0, -2) + '…';
+          ctx.fillText(t, R - 14 * dpr, 0); ctx.restore();
+        }
+      }
+    }
+    // hub
+    ctx.beginPath(); ctx.arc(0, 0, R * 0.14, 0, Math.PI * 2); ctx.fillStyle = '#010b26'; ctx.fill();
+    ctx.lineWidth = 4 * dpr; ctx.strokeStyle = '#d4a537'; ctx.stroke();
+    ctx.fillStyle = '#f3d27a'; ctx.font = `800 ${R * 0.09}px Inter,sans-serif`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.fillText('75', 0, 1 * dpr);
+    ctx.restore();
+  }
+
+  const indexAtPointer = () => {
+    const n = pool.length; if (!n) return -1;
+    const seg = (Math.PI * 2) / n, a = (((-rot) % (Math.PI * 2)) + Math.PI * 2) % (Math.PI * 2);
+    return Math.floor(a / seg) % n;
+  };
+  function tick() {
+    const i = indexAtPointer();
+    $('#ticker').innerHTML = i < 0 ? '&nbsp;' : `${esc(label(pool[i]))}<small>${esc(pool[i].affiliate)}</small>`;
+  }
+
+  function drawWinners() {
+    $('#wcount').textContent = winners.length ? `(${winners.length})` : '';
+    $('#wlist').innerHTML = winners.length
+      ? winners.map((w, i) => `<li><span class="n">${i + 1}</span><b>${esc(w.name)}</b><span style="color:var(--muted);font-size:13px">${esc(w.affiliate)}</span></li>`).join('')
+      : '<li style="color:var(--muted)">No winners yet. Press SPIN!</li>';
+  }
+
+  function showWinner(e) {
+    const colors = ['#d4a537', '#f3d27a', '#ffffff', '#8b1e2d', '#14532d'];
+    const el = document.createElement('div');
+    el.className = 'result winner-modal'; el.setAttribute('role', 'dialog');
+    el.innerHTML = `<div class="confetti" aria-hidden="true">${Array.from({ length: 90 }, () =>
+        `<i style="left:${Math.random() * 100}%;background:${colors[(Math.random() * colors.length) | 0]};animation-delay:${Math.random() * 1.2}s;transform:rotate(${Math.random() * 360}deg)"></i>`).join('')}</div>
+      <div class="result-inner">
+        <h1 class="rise d1">Congratulations!</h1>
+        <div class="who rise d2">${esc(label(e))}</div>
+        <div class="aff rise d2">${esc(e.affiliate)}${e.employee_code ? ' · ' + esc(e.employee_code) : ''}</div>
+        <div class="rise d4" style="margin-top:22px"><button class="btn btn-gold" id="wClose">Continue</button></div>
+      </div>`;
+    document.body.appendChild(el);
+    $('#wClose', el).onclick = () => { el.remove(); rebuild(); };
+  }
+
+  $('#spin').onclick = () => {
+    if (spinning || !pool.length) return;
+    spinning = true; $('#spin').disabled = true; $('#rAff').disabled = $('#rRemove').disabled = true;
+    const n = pool.length, seg = (Math.PI * 2) / n, w = randomInt(n);
+    const jitter = (Math.random() - 0.5) * seg * 0.7;
+    const target = -((w + 0.5) * seg + jitter);
+    const TWO = Math.PI * 2, start = rot;
+    const delta = ((((target - start) % TWO) + TWO) % TWO) + TWO * (6 + randomInt(3));
+    const dur = 6500, t0 = performance.now();
+    const ease = (t) => 1 - Math.pow(1 - t, 4);
+    const step = (now) => {
+      if (myRoute !== routeId) return;
+      const t = Math.min(1, (now - t0) / dur);
+      rot = start + delta * ease(t); draw(); tick();
+      if (t < 1) return requestAnimationFrame(step);
+      rot %= TWO; spinning = false; $('#rAff').disabled = $('#rRemove').disabled = false;
+      const e = pool[w];
+      winners.push({ id: e.id, name: label(e), affiliate: e.affiliate, code: e.employee_code || '', at: new Date().toISOString() });
+      saveWinners(winners); drawWinners();
+      showWinner(e);
+    };
+    requestAnimationFrame(step);
+  };
+  $('#rAff').onchange = rebuild;
+  $('#rRemove').onchange = rebuild;
+  $('#wReset').onclick = () => {
+    if (!winners.length || !confirm('Clear the winners list? Everyone who is present goes back on the wheel.')) return;
+    winners = []; saveWinners(winners); rebuild();
+  };
+  $('#wCopy').onclick = async (ev) => {
+    const text = winners.map((w, i) => `${i + 1}. ${w.name} — ${w.affiliate}${w.code ? ' (' + w.code + ')' : ''}`).join('\n');
+    try { await navigator.clipboard.writeText(text || 'No winners yet'); ev.target.textContent = 'Copied ✓'; } catch (_) {}
+  };
+  const onResize = () => draw();
+  window.addEventListener('resize', onResize);
+  cleanup = () => window.removeEventListener('resize', onResize);
+
+  async function load() {
+    $('#rcount').textContent = 'Loading…';
+    try {
+      const rows = await fetchAll(() => sb.rpc('admin_employees', { p_pin: getPin() }));
+      if (myRoute !== routeId) return;
+      present = rows.filter((e) => e.status === 'Present').sort((a, b) => fullName(a).localeCompare(fullName(b)));
+      const affs = [...new Set(present.map((e) => e.affiliate))].sort();
+      const cur = $('#rAff').value;
+      $('#rAff').innerHTML = '<option value="All">All affiliates (present only)</option>' + affs.map((a) => `<option ${a === cur ? 'selected' : ''}>${esc(a)}</option>`).join('');
+      $('#rmsg').innerHTML = '';
+      rebuild();
+    } catch (e) {
+      $('#rmsg').innerHTML = `<div class="alert alert-error">Could not load names: ${esc(e.message || e)}</div>`;
+    }
+  }
+  $('#rReload').onclick = () => { if (!spinning) load(); };
+  draw(); drawWinners();
   load();
 }
 
