@@ -1969,10 +1969,12 @@ async function renderRaffle(main) {
           <div class="panel-head"><h3>Who is in the draw</h3></div>
           <div class="panel-body" style="display:grid;gap:12px">
             <div><label class="label" for="rAff">Affiliate</label>
-              <select class="select" id="rAff"><option value="All">All affiliates (present only)</option></select></div>
+              <select class="select" id="rAff"><option value="All">All affiliates</option></select></div>
+            <label style="display:flex;gap:8px;align-items:center;font-size:14px">
+              <input type="checkbox" id="rAll"> Include everyone invited (not only present)</label>
             <label style="display:flex;gap:8px;align-items:center;font-size:14px">
               <input type="checkbox" id="rRemove" checked> Remove each winner from the wheel</label>
-            <p style="margin:0;font-size:13px;color:var(--muted)">Only employees marked <b>Present</b> are on the wheel.</p>
+            <p style="margin:0;font-size:13px;color:var(--muted)" id="rHint">Only employees marked <b>Present</b> are on the wheel.</p>
           </div>
         </section>
         <section class="panel">
@@ -1986,12 +1988,14 @@ async function renderRaffle(main) {
 
   const COLORS = ['#0b1838', '#d4a537', '#8b1e2d', '#14532d', '#1d3470', '#a87b1c'];
   const canvas = $('#wheel'), ctx = canvas.getContext('2d');
-  let present = [], pool = [], winners = loadWinners(), rot = 0, spinning = false;
+  let everyone = [], present = [], pool = [], winners = loadWinners(), rot = 0, spinning = false;
   const label = (e) => fullName(e);
 
   const rebuild = () => {
     const aff = $('#rAff').value, won = new Set(winners.map((w) => w.id));
-    pool = present.filter((e) => (aff === 'All' || e.affiliate === aff) && !($('#rRemove').checked && won.has(e.id)));
+    const base = $('#rAll').checked ? everyone : present;
+    $('#rHint').innerHTML = $('#rAll').checked ? 'Everyone in the masterlist is on the wheel, even if not checked in.' : 'Only employees marked <b>Present</b> are on the wheel.';
+    pool = base.filter((e) => (aff === 'All' || e.affiliate === aff) && !($('#rRemove').checked && won.has(e.id)));
     $('#rcount').textContent = `${pool.length} name${pool.length === 1 ? '' : 's'} in the draw`;
     $('#spin').disabled = spinning || pool.length < 1;
     draw(); drawWinners(); tick();
@@ -2011,13 +2015,14 @@ async function renderRaffle(main) {
       ctx.fillStyle = '#f3d27a'; ctx.font = `600 ${16 * dpr}px Inter,sans-serif`; ctx.textAlign = 'center';
       ctx.fillText('No checked-in names yet', 0, 6 * dpr);
     } else {
-      const seg = (Math.PI * 2) / n;
-      const showText = n <= 120, fs = Math.max(8, Math.min(18, (seg * R * 0.55) / dpr)) * dpr;
-      for (let i = 0; i < n; i++) {
-        const a0 = rot + i * seg - Math.PI / 2, col = COLORS[n % COLORS.length === 1 && i === n - 1 ? 2 : i % COLORS.length];
+      const big = n > 120, slices = big ? 24 : n; // big lists: neat sections, name shows below the wheel
+      const seg = (Math.PI * 2) / slices;
+      const showText = !big, fs = Math.max(8, Math.min(18, (seg * R * 0.55) / dpr)) * dpr;
+      for (let i = 0; i < slices; i++) {
+        const a0 = rot + i * seg - Math.PI / 2, col = COLORS[slices % COLORS.length === 1 && i === slices - 1 ? 2 : i % COLORS.length];
         ctx.beginPath(); ctx.moveTo(0, 0); ctx.arc(0, 0, R, a0, a0 + seg); ctx.closePath();
         ctx.fillStyle = col; ctx.fill();
-        if (n <= 300) { ctx.strokeStyle = 'rgba(255,255,255,.18)'; ctx.lineWidth = 1 * dpr; ctx.stroke(); }
+        if (slices <= 300) { ctx.strokeStyle = 'rgba(255,255,255,.18)'; ctx.lineWidth = 1 * dpr; ctx.stroke(); }
         if (showText) {
           ctx.save(); ctx.rotate(a0 + seg / 2);
           ctx.fillStyle = col === '#d4a537' || col === '#a87b1c' ? '#0b1838' : '#fff';
@@ -2071,7 +2076,7 @@ async function renderRaffle(main) {
 
   $('#spin').onclick = () => {
     if (spinning || !pool.length) return;
-    spinning = true; $('#spin').disabled = true; $('#rAff').disabled = $('#rRemove').disabled = true;
+    spinning = true; $('#spin').disabled = true; $('#rAff').disabled = $('#rRemove').disabled = $('#rAll').disabled = true;
     const n = pool.length, seg = (Math.PI * 2) / n, w = randomInt(n);
     const jitter = (Math.random() - 0.5) * seg * 0.7;
     const target = -((w + 0.5) * seg + jitter);
@@ -2084,7 +2089,7 @@ async function renderRaffle(main) {
       const t = Math.min(1, (now - t0) / dur);
       rot = start + delta * ease(t); draw(); tick();
       if (t < 1) return requestAnimationFrame(step);
-      rot %= TWO; spinning = false; $('#rAff').disabled = $('#rRemove').disabled = false;
+      rot %= TWO; spinning = false; $('#rAff').disabled = $('#rRemove').disabled = $('#rAll').disabled = false;
       const e = pool[w];
       winners.push({ id: e.id, name: label(e), affiliate: e.affiliate, code: e.employee_code || '', at: new Date().toISOString() });
       saveWinners(winners); drawWinners();
@@ -2094,6 +2099,7 @@ async function renderRaffle(main) {
   };
   $('#rAff').onchange = rebuild;
   $('#rRemove').onchange = rebuild;
+  $('#rAll').onchange = rebuild;
   $('#wReset').onclick = () => {
     if (!winners.length || !confirm('Clear the winners list? Everyone who is present goes back on the wheel.')) return;
     winners = []; saveWinners(winners); rebuild();
@@ -2111,10 +2117,11 @@ async function renderRaffle(main) {
     try {
       const rows = await fetchAll(() => sb.rpc('admin_employees', { p_pin: getPin() }));
       if (myRoute !== routeId) return;
-      present = rows.filter((e) => e.status === 'Present').sort((a, b) => fullName(a).localeCompare(fullName(b)));
-      const affs = [...new Set(present.map((e) => e.affiliate))].sort();
+      everyone = rows.slice().sort((a, b) => fullName(a).localeCompare(fullName(b)));
+      present = everyone.filter((e) => e.status === 'Present');
+      const affs = [...new Set(everyone.map((e) => e.affiliate))].sort();
       const cur = $('#rAff').value;
-      $('#rAff').innerHTML = '<option value="All">All affiliates (present only)</option>' + affs.map((a) => `<option ${a === cur ? 'selected' : ''}>${esc(a)}</option>`).join('');
+      $('#rAff').innerHTML = '<option value="All">All affiliates</option>' + affs.map((a) => `<option ${a === cur ? 'selected' : ''}>${esc(a)}</option>`).join('');
       $('#rmsg').innerHTML = '';
       rebuild();
     } catch (e) {
